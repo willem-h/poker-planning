@@ -180,20 +180,25 @@
 
                 this.peers.set(peerId, { pc, dataChannel, state: 'connecting' });
 
-                const offer = await pc.createOffer();
-                await pc.setLocalDescription(offer);
-
+                let candidates = [];
                 return new Promise((resolve) => {
-                    if (pc.iceGatheringState === 'complete') {
-                        resolve(btoa(JSON.stringify(pc.localDescription)));
-                    } else {
-                        pc.onicegatheringstatechange = () => {
-                            if (pc.iceGatheringState === 'complete') {
-                                resolve(btoa(JSON.stringify(pc.localDescription)));
-                            }
-                        };
-                        setTimeout(() => resolve(btoa(JSON.stringify(pc.localDescription))), 1500);
-                    }
+                    pc.onicecandidate = (event) => {
+                        if (event.candidate) {
+                            candidates.push(event.candidate);
+                        } else {
+                            resolve(btoa(JSON.stringify(pc.localDescription)));
+                        }
+                    };
+
+                    pc.createOffer()
+                      .then(offer => pc.setLocalDescription(offer))
+                      .catch(err => console.error("Offer error", err));
+
+                    setTimeout(() => {
+                        if (pc.localDescription) {
+                            resolve(btoa(JSON.stringify(pc.localDescription)));
+                        }
+                    }, 2000);
                 });
             }
 
@@ -217,20 +222,26 @@
 
                 const offer = JSON.parse(atob(offerString));
                 await pc.setRemoteDescription(new RTCSessionDescription(offer));
-                const answer = await pc.createAnswer();
-                await pc.setLocalDescription(answer);
-
+                
+                let candidates = [];
                 return new Promise((resolve) => {
-                    if (pc.iceGatheringState === 'complete') {
-                        resolve(btoa(JSON.stringify(pc.localDescription)));
-                    } else {
-                        pc.onicegatheringstatechange = () => {
-                            if (pc.iceGatheringState === 'complete') {
-                                resolve(btoa(JSON.stringify(pc.localDescription)));
-                            }
-                        };
-                        setTimeout(() => resolve(btoa(JSON.stringify(pc.localDescription))), 1500);
-                    }
+                    pc.onicecandidate = (event) => {
+                        if (event.candidate) {
+                            candidates.push(event.candidate);
+                        } else {
+                            resolve(btoa(JSON.stringify(pc.localDescription)));
+                        }
+                    };
+
+                    pc.createAnswer()
+                      .then(answer => pc.setLocalDescription(answer))
+                      .catch(err => console.error("Answer error", err));
+
+                    setTimeout(() => {
+                        if (pc.localDescription) {
+                            resolve(btoa(JSON.stringify(pc.localDescription)));
+                        }
+                    }, 2000);
                 });
             }
 
@@ -427,12 +438,14 @@
                 const params = new URLSearchParams(hash.substring(1));
                 if (params.get('offer')) {
                     document.getElementById('input-invite-url').value = window.location.href;
-                    document.getElementById('input-username').focus();
+                    const nameInput = document.getElementById('input-username');
+                    nameInput.focus();
+                    nameInput.placeholder = "Enter your name to join...";
                 }
             }
 
             async handleJoinInput() {
-                this.myName = document.getElementById('input-username').value.trim() || 'Player';
+                this.myName = document.getElementById('input-username').value.trim() || 'Player ' + Math.floor(Math.random() * 100);
                 const urlInput = document.getElementById('input-invite-url').value.trim();
                 
                 let offerStr = '';
@@ -457,7 +470,12 @@
                 this.isHost = false;
                 this.webrtc = new WebRTCManager(false,
                     (peerId, msg) => this.handleMessage(peerId, msg),
-                    (peerId, state) => this.handlePeerStateChange(peerId, state)
+                    (peerId, state) => {
+                        this.handlePeerStateChange(peerId, state);
+                        if (state === 'connected') {
+                            this.webrtc.broadcast({ type: 'JOIN', name: this.myName });
+                        }
+                    }
                 );
 
                 this.switchView('room');
@@ -553,7 +571,8 @@
             broadcastState() {
                 if (!this.isHost) return;
                 const snapshot = this.session.getStateSnapshot();
-                this.webrtc.broadcast({ type: 'STATE_UPDATE', state: snapshot });
+                this.sessionState = snapshot;
+                this.renderClientRoom();
             }
 
             renderRoom() {
