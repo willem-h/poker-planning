@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Planning Poker — peer-to-peer over iroh</title>
+<meta name="description" content="Serverless planning poker. Peers connect directly to each other with iroh; there is no backend holding your estimates.">
+<link rel="stylesheet" href="./styles.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🃏</text></svg>">
+</head>
+<body>
+<div class="app">
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true">🃏</span>
+      <div>
+        <h1>Planning Poker</h1>
+        <p class="brand-sub">peer-to-peer over <a href="https://www.iroh.computer" target="_blank" rel="noreferrer">iroh</a></p>
+      </div>
+    </div>
+    <div id="status" class="status status-idle" role="status" aria-live="polite">
+      <span class="status-dot" aria-hidden="true"></span>
+      <span id="status-text">Not connected</span>
+    </div>
+  </header>
+
+  <!-- Landing -->
+  <main id="view-home" class="view is-active">
+    <section class="panel panel-hero">
+      <h2>Estimate together, without a server</h2>
+      <p class="lede">
+        Your browser opens an iroh endpoint and joins a gossip topic. Estimates travel
+        directly between participants, end-to-end encrypted. Nothing is stored anywhere,
+        and the room disappears when the last tab closes.
+      </p>
+
+      <form id="form-start" class="stack" autocomplete="off">
+        <label class="field">
+          <span>Your name</span>
+          <input id="input-name" type="text" maxlength="24" placeholder="e.g. Alex" required>
+        </label>
+
+        <label class="field">
+          <span>Invite <em>(leave empty to start a new room)</em></span>
+          <input id="input-invite" type="text" placeholder="Paste an invite link or code">
+        </label>
+
+        <button id="btn-start" class="btn btn-primary" type="submit">Start a room</button>
+        <p id="home-error" class="error" hidden></p>
+      </form>
+    </section>
+
+    <section class="panel panel-notes">
+      <h3>How it works</h3>
+      <dl class="notes">
+        <dt>No host</dt>
+        <dd>Every participant holds the whole room and merges what the others broadcast, so
+            nobody's departure ends the session.</dd>
+        <dt>Votes stay hidden</dt>
+        <dd>While a round is open, peers publish only a hash of their estimate. The values
+            are released on reveal and checked against those hashes.</dd>
+        <dt>Relayed, not readable</dt>
+        <dd>Browsers can't send UDP, so traffic hops through an iroh relay. The relay moves
+            encrypted QUIC packets and cannot read them.</dd>
+      </dl>
+    </section>
+  </main>
+
+  <!-- Room -->
+  <main id="view-room" class="view">
+    <section class="panel panel-invite">
+      <div class="invite-head">
+        <h2>Invite the room</h2>
+        <span id="peer-count" class="pill">1 here</span>
+      </div>
+      <div class="invite-row">
+        <input id="invite-url" type="text" readonly aria-label="Invite link">
+        <button id="btn-copy" class="btn btn-secondary" type="button">Copy</button>
+        <button id="btn-leave" class="btn btn-secondary" type="button">Leave</button>
+      </div>
+      <p class="hint">Anyone with this link joins the same room. Share it however you like —
+        it carries no secrets beyond room membership.</p>
+    </section>
+
+    <section class="panel panel-table">
+      <div class="table-head">
+        <h2 id="round-label">Round 1</h2>
+        <div class="table-actions">
+          <button id="btn-reveal" class="btn btn-primary" type="button">Reveal</button>
+          <button id="btn-reset" class="btn btn-secondary" type="button">New round</button>
+        </div>
+      </div>
+      <div id="cards" class="cards"></div>
+      <div id="stats" class="stats" hidden></div>
+    </section>
+
+    <section class="panel panel-deck">
+      <h2>Your estimate</h2>
+      <div id="deck" class="deck" role="group" aria-label="Estimate cards"></div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <span id="my-id" class="mono"></span>
+  </footer>
+</div>
+
+<script type="module" src="./app.js"></script>
+</body>
+</html>

@@ -1,0 +1,35 @@
+[package]
+name = "poker-wasm"
+version = "0.1.0"
+edition = "2021"
+description = "Peer-to-peer planning poker built on iroh"
+license = "MIT"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+iroh = { version = "1.0", default-features = false, features = ["tls-ring"] }
+iroh-gossip = { version = "0.101", default-features = false, features = ["net"] }
+n0-future = "0.3"
+n0-error = "1.0"
+
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+js-sys = "0.3"
+web-sys = { version = "0.3", features = ["console"] }
+futures-channel = "0.3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+postcard = { version = "1", features = ["alloc"] }
+data-encoding = "2"
+blake3 = "1"
+rand = "0.10"
+bytes = "1"
+tracing = "0.1"
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+panic = "abort"
