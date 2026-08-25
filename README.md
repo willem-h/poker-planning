@@ -142,7 +142,20 @@ addresses, so nothing outside your network is contacted.
 ## Deploying
 
 `.github/workflows/pages.yml` runs the tests, builds the wasm module and
-publishes `public/` on every push to `main`. Enable it once under
-**Settings → Pages → Source → GitHub Actions**.
+publishes `public/`. It deploys on a push to the default branch, and on a push
+to any branch with an open pull request, so a change can be looked at before it
+is merged.
+
+Two one-time settings:
+
+- **Settings → Pages → Source → GitHub Actions**
+- **Settings → Environments → `github-pages` → Deployment branches → All
+  branches**, otherwise anything but the default branch is refused with
+  *"not allowed to deploy to github-pages due to environment protection rules"*.
+
+A repository has only one Pages site, so **whichever branch deployed last is the
+one that is live** — a deploy from a pull request replaces what was there. The
+run's summary says which branch it published. Deploys are serialised, and a
+branch stops deploying once its pull request closes.
 
 Any static host works — there is no server side to deploy.
