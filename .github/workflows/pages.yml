@@ -31,8 +31,17 @@ jobs:
         with:
           workspaces: wasm
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
       - name: Check room logic
-        run: cargo test --manifest-path wasm/Cargo.toml
+        # Once per transport: the room is the same code, but each feature set
+        # compiles a different half of the crate around it.
+        run: |
+          cargo test --manifest-path wasm/Cargo.toml --no-default-features --features iroh-transport
+          cargo test --manifest-path wasm/Cargo.toml --no-default-features --features webrtc-transport
 
       - name: Install wasm-bindgen-cli
         # Must match the wasm-bindgen version resolved in wasm/Cargo.lock.

@@ -6,8 +6,17 @@
 import { chromium } from 'playwright';
 
 const APP = process.env.APP_URL ?? 'http://localhost:8080/index.html';
-const RELAY = process.env.RELAY_URL ?? 'http://localhost:3340';
-const URL = `${APP}?relay=${RELAY}`;
+const TRANSPORT = process.env.TRANSPORT ?? 'iroh';
+
+// Each transport needs its own server pointed at: iroh relays the session,
+// WebRTC only needs somewhere to exchange the handshake.
+const params = new URLSearchParams({ transport: TRANSPORT });
+if (TRANSPORT === 'iroh') {
+  params.set('relay', process.env.RELAY_URL ?? 'http://localhost:3340');
+} else {
+  params.set('signal', process.env.SIGNAL_URL ?? 'ws://localhost:8081');
+}
+const URL = `${APP}?${params}`;
 
 const log = (tag, ...a) => console.log(`[${tag}]`, ...a);
 
@@ -37,7 +46,7 @@ await host.waitForSelector('#view-room.is-active', { timeout: 90000 });
 await host.waitForFunction(() => document.getElementById('invite-url').value.length > 0, null, { polling: 500, timeout: 90000 });
 const invite = await host.locator('#invite-url').inputValue();
 log('host', 'status:', await status(host));
-log('host', 'invite length:', invite.length);
+log('host', `transport: ${TRANSPORT}, invite length: ${invite.length}`);
 
 const guest = await newPeer('guest');
 await guest.fill('#input-name', 'Grace');
@@ -96,6 +105,43 @@ await third.waitForSelector('#view-room.is-active', { timeout: 90000 });
 await waitPeers(third, 3, 'third');
 await waitPeers(host, 3, 'host');
 log('OK', 'third peer joined via a non-creator invite; all see 3');
+
+// What each connection actually settled on. This is the difference between the
+// two transports, so assert it rather than just printing it.
+// One path per other participant: WebRTC meshes the room, so with three peers
+// present the host holds two connections of its own.
+const expectedPaths = TRANSPORT === 'webrtc' ? 2 : 1;
+await host
+  .waitForFunction(
+    (n) => {
+      const paths = [...document.querySelectorAll('.path')];
+      return paths.length === n && paths.every((e) => !e.textContent.endsWith('pending'));
+    },
+    expectedPaths,
+    { polling: 500, timeout: 60000 },
+  )
+  .catch(async () => {
+    throw new Error(
+      `host never settled ${expectedPaths} connection paths; saw ` +
+        (await host.evaluate(() => [...document.querySelectorAll('.path')].map((e) => e.textContent))),
+    );
+  });
+
+const paths = await host.evaluate(() =>
+  [...document.querySelectorAll('.path')].map((e) => ({ text: e.textContent, detail: e.title })),
+);
+log('paths', JSON.stringify(paths));
+if (TRANSPORT === 'webrtc') {
+  if (paths.length === 0) throw new Error('no connection paths reported');
+  const relayed = paths.filter((p) => p.text.endsWith('relay'));
+  if (relayed.length) throw new Error(`expected direct connections, got relayed: ${JSON.stringify(relayed)}`);
+  log('OK', `${paths.length} direct peer connections, no relay in the path`);
+} else {
+  if (!paths.some((p) => p.text.endsWith('relay'))) {
+    throw new Error('iroh in a browser should report a relayed path');
+  }
+  log('OK', 'iroh reports the session as relayed, as expected');
+}
 
 // A peer that closes its tab should drop off the table on its own.
 await third.context().close();

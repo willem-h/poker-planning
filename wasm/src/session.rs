@@ -16,7 +16,7 @@ use n0_future::{task, time::Duration, StreamExt};
 use wasm_bindgen::prelude::*;
 
 use crate::{
-    protocol::{commit, open, seal, Room, HEARTBEAT_MS},
+    protocol::{open, seal, Room, HEARTBEAT_MS},
     ticket::Ticket,
 };
 
@@ -39,11 +39,6 @@ pub fn deck() -> Vec<String> {
 
 fn now_ms() -> f64 {
     js_sys::Date::now()
-}
-
-fn random_nonce() -> String {
-    let bytes: [u8; 8] = rand::random();
-    data_encoding::HEXLOWER.encode(&bytes)
 }
 
 fn js_err(context: &str, err: impl std::fmt::Display) -> JsValue {
@@ -254,33 +249,16 @@ impl Session {
 
     /// Casts (or changes) our vote for this round.
     pub fn vote(&self, value: String) {
-        {
-            let mut room = self.room.borrow_mut();
-            if room.round.revealed {
-                // Votes are locked once they are on the table.
-                return;
-            }
-            let nonce = random_nonce();
-            let peer = room.my_peer();
-            peer.commitment = Some(commit(&value, &nonce));
-            peer.value = Some(value);
-            peer.nonce = Some(nonce);
-            peer.seq += 1;
+        if self.room.borrow_mut().cast_vote(value) {
+            self.publish();
         }
-        self.publish();
     }
 
     /// Turns every card face up.
     pub fn reveal(&self) {
-        {
-            let mut room = self.room.borrow_mut();
-            if room.round.revealed {
-                return;
-            }
-            room.round.revealed = true;
-            room.my_peer().seq += 1;
+        if self.room.borrow_mut().reveal() {
+            self.publish();
         }
-        self.publish();
     }
 
     /// Clears the table and starts the next round.
@@ -292,16 +270,9 @@ impl Session {
     /// Changes the name we show up under.
     #[wasm_bindgen(js_name = setName)]
     pub fn set_name(&self, name: String) {
-        {
-            let mut room = self.room.borrow_mut();
-            let peer = room.my_peer();
-            if peer.name == name {
-                return;
-            }
-            peer.name = name;
-            peer.seq += 1;
+        if self.room.borrow_mut().rename(name) {
+            self.publish();
         }
-        self.publish();
     }
 
     /// Leaves the room and closes the endpoint.

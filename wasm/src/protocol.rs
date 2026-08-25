@@ -7,7 +7,7 @@
 
 use std::collections::HashMap;
 
-use iroh::{EndpointId, PublicKey, SecretKey, Signature};
+use iroh_base::{EndpointId, PublicKey, SecretKey, Signature};
 use serde::{Deserialize, Serialize};
 
 /// How long a peer may stay silent before we consider it gone.
@@ -119,9 +119,9 @@ pub enum RejectedMessage {
 
 /// Serialises an announcement and signs it as us.
 pub fn seal(secret: &SecretKey, announce: &Announce) -> Vec<u8> {
-    let payload = postcard::to_stdvec(announce).expect("announce is always serializable");
+    let payload = postcard::to_allocvec(announce).expect("announce is always serializable");
     let signature = secret.sign(&payload);
-    postcard::to_stdvec(&Signed {
+    postcard::to_allocvec(&Signed {
         from: secret.public(),
         payload,
         signature: signature.to_bytes().to_vec(),
@@ -169,6 +169,11 @@ pub enum VoteState {
     /// Revealed but the value does not match the commitment: someone changed
     /// their vote after committing to it.
     Tampered,
+}
+
+fn new_nonce() -> String {
+    let bytes: [u8; 8] = rand::random();
+    data_encoding::HEXLOWER.encode(&bytes)
 }
 
 pub fn commit(value: &str, nonce: &str) -> String {
@@ -235,6 +240,44 @@ impl Room {
 
     pub fn my_peer(&mut self) -> &mut Peer {
         self.peers.get_mut(&self.me).expect("self is always present")
+    }
+
+    /// Records our own estimate for this round.
+    ///
+    /// Returns false once the cards are face up: a vote changed then would only
+    /// contradict the commitment everyone has already checked.
+    pub fn cast_vote(&mut self, value: String) -> bool {
+        if self.round.revealed {
+            return false;
+        }
+        let nonce = new_nonce();
+        let peer = self.my_peer();
+        peer.commitment = Some(commit(&value, &nonce));
+        peer.value = Some(value);
+        peer.nonce = Some(nonce);
+        peer.seq += 1;
+        true
+    }
+
+    /// Turns every card face up. Returns false if they already were.
+    pub fn reveal(&mut self) -> bool {
+        if self.round.revealed {
+            return false;
+        }
+        self.round.revealed = true;
+        self.my_peer().seq += 1;
+        true
+    }
+
+    /// Changes the name we appear under. Returns false if it was already that.
+    pub fn rename(&mut self, name: String) -> bool {
+        let peer = self.my_peer();
+        if peer.name == name {
+            return false;
+        }
+        peer.name = name;
+        peer.seq += 1;
+        true
     }
 
     /// Starts the next round, clearing the table.
@@ -455,7 +498,7 @@ mod tests {
     use super::*;
 
     fn peer_id(seed: u8) -> EndpointId {
-        iroh::SecretKey::from_bytes(&[seed; 32]).public()
+        SecretKey::from_bytes(&[seed; 32]).public()
     }
 
     fn room() -> Room {
@@ -660,6 +703,48 @@ mod tests {
         // Our own cleared state must go back out, so peers stop showing our
         // last round's vote.
         assert!(room.announce().commitment.is_none());
+    }
+
+    #[test]
+    fn casting_a_vote_commits_to_it() {
+        let mut room = room();
+        assert!(room.cast_vote("5".into()));
+
+        let me = room.peers.get(&room.me).expect("self").clone();
+        let commitment = me.commitment.expect("committed");
+        let nonce = me.nonce.expect("nonced");
+        assert_eq!(commit("5", &nonce), commitment);
+        // Two votes for the same value get different nonces, so a peer cannot
+        // recognise an estimate by its commitment alone.
+        room.round.revealed = false;
+        let first = commitment;
+        room.cast_vote("5".into());
+        assert_ne!(
+            room.peers.get(&room.me).expect("self").commitment.as_deref(),
+            Some(first.as_str())
+        );
+    }
+
+    #[test]
+    fn a_vote_is_refused_once_the_cards_are_up() {
+        let mut room = room();
+        room.cast_vote("5".into());
+        assert!(room.reveal());
+
+        assert!(!room.cast_vote("13".into()));
+        assert!(!room.reveal(), "revealing twice is a no-op");
+        assert_eq!(
+            room.peers.get(&room.me).expect("self").value.as_deref(),
+            Some("5")
+        );
+    }
+
+    #[test]
+    fn renaming_is_a_no_op_when_the_name_is_unchanged() {
+        let mut room = room();
+        assert!(!room.rename("me".into()));
+        assert!(room.rename("Ada".into()));
+        assert_eq!(room.announce().name, "Ada");
     }
 
     #[test]

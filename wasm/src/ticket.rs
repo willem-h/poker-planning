@@ -1,6 +1,6 @@
 //! Invite tickets: everything a browser needs to find the room.
 
-use iroh::EndpointAddr;
+use iroh_base::EndpointAddr;
 use iroh_gossip::proto::TopicId;
 use serde::{Deserialize, Serialize};
 
@@ -45,7 +45,7 @@ impl Ticket {
     }
 
     pub fn encode(&self) -> String {
-        let bytes = postcard::to_stdvec(self).expect("ticket is always serializable");
+        let bytes = postcard::to_allocvec(self).expect("ticket is always serializable");
         data_encoding::BASE32_NOPAD
             .encode(&bytes)
             .to_ascii_lowercase()
@@ -73,7 +73,7 @@ mod tests {
     use super::*;
 
     fn addr(seed: u8) -> EndpointAddr {
-        EndpointAddr::from(iroh::SecretKey::from_bytes(&[seed; 32]).public())
+        EndpointAddr::from(iroh_base::SecretKey::from_bytes(&[seed; 32]).public())
     }
 
     fn ticket() -> Ticket {

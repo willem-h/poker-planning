@@ -321,3 +321,54 @@ input[type="text"]:focus-visible {
   .seat, .seat-face { width: 76px; }
   .seat-face { height: 100px; font-size: 22px; }
 }
+
+/* Transport picker */
+
+.picker { display: grid; gap: 8px; grid-template-columns: 1fr 1fr; }
+
+.picker button {
+  display: grid;
+  gap: 2px;
+  padding: 12px;
+  text-align: left;
+  font: inherit;
+  color: var(--ink);
+  background: var(--bg);
+  border: 2px solid var(--line);
+  border-radius: 10px;
+  cursor: pointer;
+}
+
+.picker button strong { font-size: 15px; font-weight: 600; }
+.picker button em { font-style: normal; font-size: 12px; color: var(--ink-soft); line-height: 1.35; }
+.picker button:hover { border-color: var(--accent); }
+
+.picker button.is-selected {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, var(--panel));
+}
+
+@media (max-width: 560px) {
+  .picker { grid-template-columns: 1fr; }
+}
+
+/* Connection paths */
+
+.invite-meta { display: flex; gap: 8px; flex-wrap: wrap; }
+
+.paths { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+.paths:empty { display: none; }
+
+.path {
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  color: var(--ink-soft);
+  cursor: help;
+}
+
+.path-direct { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 40%, var(--line)); }
+.path-relay { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 40%, var(--line)); }

@@ -1,7 +1,6 @@
-// UI layer. All networking lives in the wasm module: this file starts a
-// session, renders whatever room state it hands back, and forwards clicks.
-
-import init, { Session, deck } from './pkg/poker.js';
+// UI layer. The room semantics live in the wasm module and the wire lives in a
+// transport module; this file starts one, renders what it reports, and forwards
+// clicks. It does not know which transport it got.
 
 const el = (id) => document.getElementById(id);
 
@@ -15,10 +14,13 @@ const ui = {
   invite: el('input-invite'),
   start: el('btn-start'),
   homeError: el('home-error'),
+  transportPicker: el('transport-picker'),
+  transportBadge: el('transport-badge'),
   inviteUrl: el('invite-url'),
   copy: el('btn-copy'),
   leave: el('btn-leave'),
   peerCount: el('peer-count'),
+  paths: el('paths'),
   roundLabel: el('round-label'),
   reveal: el('btn-reveal'),
   reset: el('btn-reset'),
@@ -28,24 +30,49 @@ const ui = {
   myId: el('my-id'),
 };
 
-let session = null;
+const NAME_KEY = 'poker.name';
+const TRANSPORTS = { iroh: './transports/iroh.js', webrtc: './transports/webrtc.js' };
+const DEFAULT_TRANSPORT = 'iroh';
+
+let transport = null;
+let handle = null;
 let myVote = null;
 let lastRound = null;
+let pathTimer = null;
 
-const NAME_KEY = 'poker.name';
+// --- url ------------------------------------------------------------------
+
+const query = () => new URLSearchParams(location.search);
 
 function inviteFromLocation() {
-  const match = window.location.hash.match(/room=([^&]+)/);
-  return match ? decodeURIComponent(match[1]) : '';
+  return parseInvite(window.location.hash);
 }
 
-// Optional `?relay=` override, for self-hosted relays or networks that block
-// the public ones. Carried into invites so the whole room agrees on it.
-function relayFromLocation() {
-  const fromQuery = new URLSearchParams(location.search).get('relay');
-  const fromHash = window.location.hash.match(/relay=([^&]+)/);
-  return fromQuery || (fromHash ? decodeURIComponent(fromHash[1]) : '') || undefined;
+// Accepts a full invite URL, a bare fragment, or the room token on its own, so
+// pasting from a chat window works whatever came along with it.
+function parseInvite(text) {
+  const match = text.match(/room=([^&\s]+)/);
+  return decodeURIComponent(match ? match[1] : text.trim());
 }
+
+function chosenTransport() {
+  const wanted = query().get('transport');
+  return wanted in TRANSPORTS ? wanted : DEFAULT_TRANSPORT;
+}
+
+// Transport-specific overrides, all carried in the query string so they survive
+// into the invite links people share and the whole room agrees on them.
+function transportOptions() {
+  const q = query();
+  const turn = q.get('turn');
+  return {
+    relay: q.get('relay') ?? undefined,
+    signal: q.get('signal') ?? undefined,
+    turn: turn ? { urls: [turn], username: q.get('turnUser') ?? '', credential: q.get('turnPass') ?? '' } : undefined,
+  };
+}
+
+// --- rendering -------------------------------------------------------------
 
 function setStatus(kind, text) {
   ui.status.className = `status status-${kind}`;
@@ -56,8 +83,6 @@ function showError(message) {
   ui.homeError.textContent = message;
   ui.homeError.hidden = false;
 }
-
-// --- rendering -------------------------------------------------------------
 
 function renderDeck(values) {
   ui.deck.replaceChildren(
@@ -126,6 +151,8 @@ function renderRoom(state) {
 
   renderStats(state.stats);
   renderDeckSelection(state.revealed);
+  // Peers arriving and leaving is exactly when the paths change.
+  schedulePaths();
 }
 
 function renderStats(stats) {
@@ -163,12 +190,42 @@ function renderStats(stats) {
   ui.stats.replaceChildren(figures, tally);
 }
 
+// How each connection actually settled — the whole point of having two
+// transports to compare.
+//
+// Coalesced: a burst of room updates should cost one round of getStats(), and
+// a connection needs a moment after it forms before it has a nominated pair.
+let pathsPending = false;
+
+function schedulePaths() {
+  if (pathsPending || !handle) return;
+  pathsPending = true;
+  setTimeout(() => {
+    pathsPending = false;
+    renderPaths();
+  }, 400);
+}
+
+async function renderPaths() {
+  if (!handle) return;
+  const paths = await handle.paths();
+  ui.paths.replaceChildren(
+    ...paths.map((path) => {
+      const chip = document.createElement('span');
+      chip.className = `path path-${path.kind}`;
+      chip.textContent = `${path.label}: ${path.kind}`;
+      chip.title = path.detail;
+      return chip;
+    }),
+  );
+}
+
 // --- actions ---------------------------------------------------------------
 
 function castVote(value) {
-  if (!session) return;
+  if (!handle) return;
   myVote = value;
-  session.vote(value);
+  handle.vote(value);
   renderDeckSelection(false);
 }
 
@@ -178,13 +235,16 @@ async function startSession(invite, name) {
   setStatus('connecting', 'Starting…');
 
   try {
-    session = await Session.join(
-      invite || undefined,
+    transport = (await import(TRANSPORTS[chosenTransport()])).default;
+    renderDeck((await transport.load()).deck);
+
+    handle = await transport.join({
+      invite: invite || undefined,
       name,
-      relayFromLocation(),
-      (json) => renderRoom(JSON.parse(json)),
-      (kind, detail) => setStatus(kind, detail),
-    );
+      ...transportOptions(),
+      onState: renderRoom,
+      onStatus: setStatus,
+    });
   } catch (err) {
     ui.start.disabled = false;
     setStatus('idle', 'Not connected');
@@ -192,25 +252,32 @@ async function startSession(invite, name) {
     return;
   }
 
-  const fragment = `#room=${session.invite}`;
+  const fragment = `#room=${handle.invite}`;
   ui.inviteUrl.value = `${location.origin}${location.pathname}${location.search}${fragment}`;
-  ui.myId.textContent = `you are ${session.endpointId}`;
+  ui.myId.textContent = `you are ${handle.id}`;
+  ui.transportBadge.textContent = `${transport.label} — ${transport.tagline}`;
   // Reloading the page rejoins the same room rather than dropping to the form.
   history.replaceState(null, '', `${location.search}${fragment}`);
 
   ui.home.classList.remove('is-active');
   ui.room.classList.add('is-active');
+
+  renderPaths();
+  // A backstop: a connection can be renegotiated without the room changing.
+  pathTimer = setInterval(renderPaths, 5000);
 }
 
 async function leaveRoom() {
-  if (!session) return;
-  const leaving = session;
-  session = null;
+  if (!handle) return;
+  const leaving = handle;
+  handle = null;
   myVote = null;
   lastRound = null;
+  clearInterval(pathTimer);
 
   ui.room.classList.remove('is-active');
   ui.home.classList.add('is-active');
+  ui.paths.replaceChildren();
   ui.start.disabled = false;
   setStatus('idle', 'Not connected');
   // Drop the room out of the URL so a reload does not rejoin it.
@@ -218,15 +285,28 @@ async function leaveRoom() {
   ui.invite.value = '';
   ui.start.textContent = 'Start a room';
 
-  // `leave` consumes the session on the Rust side, so nothing may touch it after.
+  // The iroh session is consumed on the Rust side, so nothing may touch it after.
   await leaving.leave();
 }
 
 // --- wiring ----------------------------------------------------------------
 
-async function main() {
-  await init();
-  renderDeck(deck());
+function wireTransportPicker() {
+  const current = chosenTransport();
+  for (const button of ui.transportPicker.querySelectorAll('button')) {
+    button.classList.toggle('is-selected', button.dataset.transport === current);
+    button.addEventListener('click', () => {
+      // The transport is a URL parameter so that it is carried into invites and
+      // survives a reload; switching means reloading onto it.
+      const q = query();
+      q.set('transport', button.dataset.transport);
+      location.search = q.toString();
+    });
+  }
+}
+
+function main() {
+  wireTransportPicker();
 
   const prefilled = inviteFromLocation();
   if (prefilled) {
@@ -248,15 +328,14 @@ async function main() {
       return;
     }
     localStorage.setItem(NAME_KEY, name);
-    startSession(ui.invite.value.trim(), name);
+    startSession(parseInvite(ui.invite.value), name);
   });
 
   ui.leave.addEventListener('click', () => leaveRoom());
-
-  ui.reveal.addEventListener('click', () => session?.reveal());
+  ui.reveal.addEventListener('click', () => handle?.reveal());
   ui.reset.addEventListener('click', () => {
     myVote = null;
-    session?.reset();
+    handle?.reset();
   });
 
   ui.copy.addEventListener('click', async () => {
@@ -273,14 +352,11 @@ async function main() {
 
   // Number keys pick a card, so a whole round can be run from the keyboard.
   document.addEventListener('keydown', (event) => {
-    if (!session || event.metaKey || event.ctrlKey) return;
+    if (!handle || event.metaKey || event.ctrlKey) return;
     if (document.activeElement?.tagName === 'INPUT') return;
     const button = [...ui.deck.children].find((b) => b.dataset.value === event.key);
     if (button && !button.disabled) castVote(button.dataset.value);
   });
 }
 
-main().catch((err) => {
-  setStatus('error', 'Failed to load');
-  showError(`Could not start the app: ${err}`);
-});
+main();

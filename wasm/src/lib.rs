@@ -11,9 +11,15 @@
 // The room and its wire format are the reusable half of this crate, and are
 // public so they can be exercised on any target.
 pub mod protocol;
+// Invites name an iroh topic and the peers to dial. The WebRTC build addresses
+// rooms by plain id instead, and has no use for them.
+#[cfg(feature = "iroh-transport")]
 pub mod ticket;
 
-// The session wires the room up to iroh and to the page. It is browser-only;
-// on other targets the crate still builds so the room logic can be unit tested.
-#[cfg(target_family = "wasm")]
+// One module per transport, each browser-only; on other targets the crate still
+// builds so the room logic can be unit tested. `protocol` knows about neither:
+// it is the same room semantics either way.
+#[cfg(all(target_family = "wasm", feature = "iroh-transport"))]
 mod session;
+#[cfg(all(target_family = "wasm", feature = "webrtc-transport"))]
+mod room_api;

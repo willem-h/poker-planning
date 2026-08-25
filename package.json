@@ -1,0 +1,16 @@
+{
+  "name": "poker-planning",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "vendor": "node scripts/bundle-vendor.mjs",
+    "test:browser": "node tests/browser.mjs",
+    "relay:ws": "node scripts/ws-relay.mjs"
+  },
+  "devDependencies": {
+    "@trystero-p2p/ws-relay": "^0.25.3",
+    "esbuild": "^0.25.0",
+    "playwright": "^1.50.0",
+    "trystero": "^0.25.3"
+  }
+}

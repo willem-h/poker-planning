@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Planning Poker — peer-to-peer over iroh</title>
+<title>Planning Poker — iroh vs WebRTC</title>
 <meta name="description" content="Serverless planning poker. Peers connect directly to each other with iroh; there is no backend holding your estimates.">
 <link rel="stylesheet" href="./styles.css">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🃏</text></svg>">
@@ -15,7 +15,7 @@
       <span class="brand-mark" aria-hidden="true">🃏</span>
       <div>
         <h1>Planning Poker</h1>
-        <p class="brand-sub">peer-to-peer over <a href="https://www.iroh.computer" target="_blank" rel="noreferrer">iroh</a></p>
+        <p class="brand-sub">peer-to-peer, two ways</p>
       </div>
     </div>
     <div id="status" class="status status-idle" role="status" aria-live="polite">
@@ -45,6 +45,20 @@
           <input id="input-invite" type="text" placeholder="Paste an invite link or code">
         </label>
 
+        <div class="field">
+          <span>Transport</span>
+          <div id="transport-picker" class="picker" role="group" aria-label="Transport">
+            <button type="button" data-transport="iroh">
+              <strong>iroh</strong>
+              <em>QUIC over a relay — always relayed in a browser</em>
+            </button>
+            <button type="button" data-transport="webrtc">
+              <strong>WebRTC</strong>
+              <em>Direct peer connections, TURN as fallback</em>
+            </button>
+          </div>
+        </div>
+
         <button id="btn-start" class="btn btn-primary" type="submit">Start a room</button>
         <p id="home-error" class="error" hidden></p>
       </form>
@@ -52,6 +66,9 @@
 
     <section class="panel panel-notes">
       <h3>How it works</h3>
+      <p class="lede">Both transports run the same room: the same merging, the same vote
+        commitments, the same signatures. Only the wire underneath differs, so you can
+        switch between them and compare.</p>
       <dl class="notes">
         <dt>No host</dt>
         <dd>Every participant holds the whole room and merges what the others broadcast, so
@@ -59,9 +76,14 @@
         <dt>Votes stay hidden</dt>
         <dd>While a round is open, peers publish only a hash of their estimate. The values
             are released on reveal and checked against those hashes.</dd>
-        <dt>Relayed, not readable</dt>
-        <dd>Browsers can't send UDP, so traffic hops through an iroh relay. The relay moves
-            encrypted QUIC packets and cannot read them.</dd>
+        <dt>iroh: relayed, not readable</dt>
+        <dd>Browsers can't send UDP, so hole punching is impossible and traffic hops through
+            an iroh relay for the whole session. The relay moves encrypted QUIC packets and
+            cannot read them.</dd>
+        <dt>WebRTC: direct where it can be</dt>
+        <dd>Peers meet over a signaling relay, then connect directly and drop it from the
+            path. Where a NAT refuses, WebRTC falls back to a TURN relay — so this is a
+            best effort, not a guarantee. The room shows which one each connection got.</dd>
       </dl>
     </section>
   </main>
@@ -71,7 +93,10 @@
     <section class="panel panel-invite">
       <div class="invite-head">
         <h2>Invite the room</h2>
-        <span id="peer-count" class="pill">1 here</span>
+        <div class="invite-meta">
+          <span id="transport-badge" class="pill"></span>
+          <span id="peer-count" class="pill">1 here</span>
+        </div>
       </div>
       <div class="invite-row">
         <input id="invite-url" type="text" readonly aria-label="Invite link">
@@ -80,6 +105,7 @@
       </div>
       <p class="hint">Anyone with this link joins the same room. Share it however you like —
         it carries no secrets beyond room membership.</p>
+      <div id="paths" class="paths" aria-label="Connection paths"></div>
     </section>
 
     <section class="panel panel-table">
