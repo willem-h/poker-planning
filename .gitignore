@@ -1,0 +1,4 @@
+# Built by build.sh / CI, deployed from the Pages artifact.
+/public/pkg/
+/wasm/target/
+/node_modules/
