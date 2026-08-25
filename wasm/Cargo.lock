@@ -2235,6 +2235,7 @@ dependencies = [
  "data-encoding",
  "futures-channel",
  "iroh",
+ "iroh-base",
  "iroh-gossip",
  "js-sys",
  "n0-error",

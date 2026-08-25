@@ -1,13 +1,41 @@
 # Planning Poker
 
-Estimation sessions with no backend. Every participant's browser opens an
-[iroh](https://www.iroh.computer) endpoint and joins a gossip topic; estimates
-travel between peers over end-to-end encrypted QUIC. Nothing is persisted, and
-the room ceases to exist when the last tab closes.
+Estimation sessions with no backend. Nothing is persisted, and the room ceases
+to exist when the last tab closes. The whole thing is static files, so it is
+served from GitHub Pages.
 
-The whole thing is static files, so it is served from GitHub Pages.
+It ships **two transports for the same room**, switchable on the landing page
+or with `?transport=`:
 
-## How it works
+| | Path between peers | Servers involved | Module size (gzipped) |
+|---|---|---|---|
+| **iroh** | always relayed | an iroh relay, for the whole session | 1.5 MB |
+| **WebRTC** | direct, TURN as fallback | a signaling relay, until peers connect | 170 KB + 59 KB |
+
+Both run identical room code — the same merging, the same vote commitments, the
+same signatures. Only the wire differs, so the two can be compared directly. The
+room shows what each connection actually settled on: `direct` or `relay`.
+
+## Why two
+
+A browser cannot open a UDP socket, so it cannot hole punch, so
+[iroh runs relay-only there](https://docs.iroh.computer/about/faq) — the relay
+stays on the path for the whole session. It cannot read anything (the QUIC
+inside is end-to-end encrypted), but it is there.
+
+WebRTC is the only browser API that hole punches. Peers meet over a signaling
+relay, connect directly, and drop it. But direct is best-effort: where a NAT
+refuses to be traversed — commonly 10–30% of connections, far more behind
+corporate firewalls — WebRTC falls back to a TURN relay, which you have to
+supply (`?turn=`). Without one, those peers simply fail to connect.
+
+So neither is unconditionally better. iroh trades a permanent relay hop for
+connecting every time and needing nothing from you; WebRTC trades a fallback you
+must provide for a direct path most of the time.
+
+## How the room works
+
+Everything below is transport-independent — it is the same Rust either way.
 
 **No host.** Earlier versions elected one browser as the host and funnelled
 everything through it, which meant the session died with that tab and needed a
@@ -40,63 +68,90 @@ throttle timers in hidden tabs; when gossip reports a peer unreachable it is
 narrowed to a few seconds, which is what makes a closed tab disappear promptly
 without evicting someone who just switched away.
 
-**Relays carry the traffic, not the meaning.** Browsers can't send UDP, so
-iroh carries these connections over a relay via WebSocket. The relay forwards
-encrypted QUIC packets and cannot read them. By default the app uses the relays
-n0 operates; `?relay=<url>` points a room at a different one.
-
 ## Layout
 
 ```
-public/          static site, deployed as-is to Pages
+public/
   index.html
-  app.js         renders room state, forwards clicks
+  app.js             renders room state, forwards clicks; transport-agnostic
   styles.css
-  pkg/           built by build.sh, gitignored
-wasm/            the Rust crate compiled to WebAssembly
-  src/protocol.rs  room state, merging, commitments, signing, statistics
-  src/ticket.rs    invite encoding
-  src/session.rs   iroh endpoint + gossip, the wasm_bindgen surface
-tests/           browser test driving three peers through a session
+  transports/
+    iroh.js          wraps the iroh session
+    webrtc.js        wraps Trystero + the transport-free room
+  pkg/               iroh build          ⎫
+  pkg-webrtc/        WebRTC build        ⎬ built by build.sh, gitignored
+  vendor/            bundled Trystero    ⎭
+wasm/
+  src/protocol.rs    room state, merging, commitments, signing, statistics
+  src/ticket.rs      invite encoding (iroh only)
+  src/session.rs     iroh endpoint + gossip
+  src/room_api.rs    the room with no transport, driven from JS
+tests/               browser test driving three peers through a session
+scripts/             vendor bundling, local signaling relay
 ```
 
-`protocol.rs` and `ticket.rs` build on any target and carry the unit tests;
-`session.rs` is browser-only.
+One crate, two cargo features. `protocol.rs` builds on any target and carries
+the unit tests; `session.rs` and `room_api.rs` are browser-only and mutually
+exclusive.
+
+A transport module is small: it moves opaque bytes and reports peers coming and
+going. Anything speaking that shape can carry a room.
 
 ## Developing
 
 ```sh
-./build.sh          # compile the wasm module into public/pkg/
+./build.sh          # both wasm modules + the bundled signaling client
 ./serve.sh          # http://localhost:8080
 cargo test --manifest-path wasm/Cargo.toml
 ```
 
-There is also a browser test that drives three peers through a whole session —
-see [tests/README.md](tests/README.md).
+There is also a browser test that drives three peers through a whole session on
+either transport — see [tests/README.md](tests/README.md).
 
 `build.sh` installs the `wasm-bindgen` CLI matching `wasm/Cargo.lock` if it is
-missing. Opening `public/index.html` off disk will not work — ES modules and
-WebAssembly need a real http origin.
+missing, and needs npm for the Trystero bundle. It finishes by checking that
+each module can still grow its externref table — wasm-bindgen's glue grows it
+the moment a module instantiates, so a build that breaks it produces a file that
+looks fine and is dead on arrival in the browser.
 
-### Running your own relay
+`WASM_OPT=1 ./build.sh` runs `wasm-opt -Os` as well, which takes about a quarter
+off each module. It is off by default: it rewrites the binary after
+wasm-bindgen has generated JS against it, and it has
+[a history](https://github.com/WebAssembly/binaryen/issues/4711) of breaking
+exactly that table, so what ships is what the browser tests ran against. Opening `public/index.html` off
+disk will not work — ES modules and WebAssembly need a real http origin.
 
-Public relays are reachable from most networks, but not all. To run one:
+### Query parameters
+
+| | |
+|---|---|
+| `?transport=iroh\|webrtc` | which wire to use |
+| `?relay=<url>` | iroh: use this relay instead of n0's |
+| `?signal=<ws url>` | WebRTC: signal here instead of over public Nostr relays |
+| `?turn=<url>` | WebRTC: fallback for peers whose NAT will not be traversed (`turnUser`, `turnPass` alongside) |
+
+All of them are carried into the invite links you share, so the whole room
+agrees.
+
+### Running your own servers
+
+Neither transport needs one by default. If your network won't reach the public
+relays, or you want a room that touches nothing outside it:
 
 ```sh
 cargo install iroh-relay --features server
-iroh-relay --dev                                  # http://localhost:3340
-./serve.sh
+iroh-relay --dev                     # iroh:   http://localhost:3340
+npm run relay:ws                     # WebRTC: ws://localhost:8081
 ```
 
-Then open `http://localhost:8080/?relay=http://localhost:3340`. The query
-string is carried into the invite links you share, so the whole room agrees on
-the relay. A room on its own relay also skips n0's address lookup — invites
-carry full addresses, so nothing outside your network is contacted.
+Then `?relay=http://localhost:3340` or `?signal=ws://localhost:8081`. A room on
+its own iroh relay also skips n0's address lookup — invites carry full
+addresses, so nothing outside your network is contacted.
 
 ## Deploying
 
-`.github/workflows/pages.yml` runs the tests, builds the wasm module and
-publishes `public/`. It deploys on a push to the default branch, and on a push
+`.github/workflows/pages.yml` runs the tests, builds both wasm modules and the
+signaling bundle, and publishes `public/`. It deploys on a push to the default branch, and on a push
 to any branch with an open pull request, so a change can be looked at before it
 is merged.
 

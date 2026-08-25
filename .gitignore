@@ -1,4 +1,6 @@
 # Built by build.sh / CI, deployed from the Pages artifact.
 /public/pkg/
+/public/pkg-webrtc/
+/public/vendor/
 /wasm/target/
 /node_modules/
