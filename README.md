@@ -141,8 +141,8 @@ addresses, so nothing outside your network is contacted.
 
 ## Deploying
 
-`.github/workflows/pages.yml` runs the tests, builds the wasm module and
-publishes `public/`. It deploys on a push to the default branch, and on a push
+`.github/workflows/pages.yml` runs the tests, builds both wasm modules and the
+signaling bundle, and publishes `public/`. It deploys on a push to the default branch, and on a push
 to any branch with an open pull request, so a change can be looked at before it
 is merged.
 
