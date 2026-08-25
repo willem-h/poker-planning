@@ -10,7 +10,7 @@ or with `?transport=`:
 | | Path between peers | Servers involved | Module size (gzipped) |
 |---|---|---|---|
 | **iroh** | always relayed | an iroh relay, for the whole session | 1.5 MB |
-| **WebRTC** | direct, TURN as fallback | a signaling relay, until peers connect | 136 KB + 59 KB |
+| **WebRTC** | direct, TURN as fallback | a signaling relay, until peers connect | 170 KB + 59 KB |
 
 Both run identical room code — the same merging, the same vote commitments, the
 same signatures. Only the wire differs, so the two can be compared directly. The
@@ -109,7 +109,16 @@ There is also a browser test that drives three peers through a whole session on
 either transport — see [tests/README.md](tests/README.md).
 
 `build.sh` installs the `wasm-bindgen` CLI matching `wasm/Cargo.lock` if it is
-missing, and needs npm for the Trystero bundle. Opening `public/index.html` off
+missing, and needs npm for the Trystero bundle. It finishes by checking that
+each module can still grow its externref table — wasm-bindgen's glue grows it
+the moment a module instantiates, so a build that breaks it produces a file that
+looks fine and is dead on arrival in the browser.
+
+`WASM_OPT=1 ./build.sh` runs `wasm-opt -Os` as well, which takes about a quarter
+off each module. It is off by default: it rewrites the binary after
+wasm-bindgen has generated JS against it, and it has
+[a history](https://github.com/WebAssembly/binaryen/issues/4711) of breaking
+exactly that table, so what ships is what the browser tests ran against. Opening `public/index.html` off
 disk will not work — ES modules and WebAssembly need a real http origin.
 
 ### Query parameters

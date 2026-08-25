@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "vendor": "node scripts/bundle-vendor.mjs",
+    "check:wasm": "node scripts/check-wasm.mjs public/pkg/poker_bg.wasm public/pkg-webrtc/room_bg.wasm",
     "test:browser": "node tests/browser.mjs",
     "relay:ws": "node scripts/ws-relay.mjs"
   },
