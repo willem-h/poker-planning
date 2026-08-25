@@ -2,7 +2,8 @@ name: Deploy to GitHub Pages
 
 on:
   push:
-    branches: [main]
+    # Any branch may deploy, but the gate job below decides whether it should.
+    branches: ['**']
   workflow_dispatch:
 
 permissions:
@@ -10,7 +11,8 @@ permissions:
   pages: write
   id-token: write
 
-# Let a running deploy finish; queue at most one more behind it.
+# A repository has one Pages site, so deploys have to serialise. Runs queue
+# rather than cancel, and the last one to finish is what is live.
 concurrency:
   group: pages
   cancel-in-progress: false
@@ -19,7 +21,50 @@ env:
   WASM_BINDGEN_VERSION: "0.2.127"
 
 jobs:
+  gate:
+    # The default branch and branches with an open pull request deploy; anything
+    # else would take the one Pages site over without anyone asking it to.
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      deploy: ${{ steps.check.outputs.deploy }}
+    steps:
+      - id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ github.ref_name }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "dispatched by hand"
+            echo "deploy=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [[ "$BRANCH" == "$DEFAULT_BRANCH" ]]; then
+            echo "$BRANCH is the default branch"
+            echo "deploy=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          open=$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$BRANCH" \
+            --state open --json number --jq 'length')
+
+          if [[ "$open" -gt 0 ]]; then
+            echo "$BRANCH has $open open pull request(s)"
+            echo "deploy=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "$BRANCH has no open pull request; not deploying"
+            echo "deploy=false" >> "$GITHUB_OUTPUT"
+          fi
+
   build:
+    needs: gate
+    if: needs.gate.outputs.deploy == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -59,3 +104,6 @@ jobs:
     steps:
       - id: deploy
         uses: actions/deploy-pages@v4
+
+      - name: Say what is live
+        run: echo "::notice::Deployed ${{ github.ref_name }} to ${{ steps.deploy.outputs.page_url }}"
